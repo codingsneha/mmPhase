@@ -138,8 +138,11 @@ def get_gt_velocity(filename):
     ax.scatter(x, y, z,color='k',label='Whole',s=1,alpha=0.1)
 
     plt.legend()
-    plt.show()
-
+    output_folder = "results"
+    plt.savefig(os.path.join(output_folder, f'{filename.split("/")[-1].split(".")[0]}_3dscatter.pdf'))
+    #plt.show(block=False)
+    #plt.pause(0.1)
+    plt.close()
 
 
 
@@ -161,8 +164,10 @@ def get_gt_velocity(filename):
     plt.axvline(np.median(df_vel['vel']),color='k',ls='--',label=f"Median: {np.round(np.median(df_vel['vel']),4)} cm/sec")
     plt.axvline(np.mean(df_vel['vel']),color='green',label=f"Mean: {np.round(np.mean(df_vel['vel']),4)} cm/sec")
     plt.legend()
-    plt.savefig('mean_median_speed_estimate.pdf')
-    plt.show()
+    plt.savefig(os.path.join(output_folder, f'{filename.split("/")[-1].split(".")[0]}_mean_median_speed_estimate.pdf'))
+    #plt.show(block=False)
+    #plt.pause(0.1)
+    plt.close()
 
     df_vel['sec']=np.round(df_vel.timestamp)
 
@@ -171,8 +176,63 @@ def get_gt_velocity(filename):
     df_vel.groupby('sec')['vel'].median().plot(label='median')
     plt.ylabel('Velocity (cm/sec)')
     plt.legend()
-    plt.ylabel('Vicon Estiated Speed')
+    plt.ylabel('Vicon Estimated Speed')
     plt.xlabel('No. of Frames')
-    plt.savefig('vel_vicon.pdf')
-    plt.show()
+    plt.savefig(os.path.join(output_folder, f'{filename.split("/")[-1].split(".")[0]}_vel_vicon.pdf'))
+    #plt.show(block=False)
+    #plt.pause(0.1)
+    plt.close()
+    
     return df_vel.groupby('sec')['vel'].mean()
+
+output_folder = "results"
+data_folder = "ground_truth"
+csv_files = ["ground_truth/"+f for f in os.listdir(data_folder)]
+results = []
+for file_name in csv_files:
+    pwm_value = file_name.split('_')[5].split('.')[0]
+    print("Processing file", file_name)
+    gt_velocity = get_gt_velocity(file_name)
+    if gt_velocity.empty:
+        print(f"No valid data for file {file_name}")
+    print(gt_velocity)
+
+    # Calculate the rolling mean to smooth the data
+    gt_velocity = gt_velocity.reset_index()
+    gt_velocity['rolling_vel'] = gt_velocity['vel'].rolling(window=5).mean()
+
+    # Identify the segment with the most stable velocity (smallest standard deviation)
+    stable_segment = gt_velocity.loc[(gt_velocity['rolling_vel'].notna()) & (gt_velocity['rolling_vel'].diff().abs() < 0.1)]
+
+    if stable_segment.empty:
+        print(f"No stable velocity segment found for file {file_name}")
+        stable_segment = gt_velocity
+    estimated_velocity = stable_segment['vel'].mean()
+
+    print(stable_segment)
+    print(f"Estimated Constant Velocity: {estimated_velocity}")
+
+    results.append((pwm_value, estimated_velocity))
+    sns.kdeplot(stable_segment['vel'])
+    plt.axvline(np.median(stable_segment['vel']), color='k', ls='--', label=f"Median: {np.round(np.median(stable_segment['vel']), 4)} cm/sec")
+    plt.axvline(np.mean(stable_segment['vel']), color='green', label=f"Mean: {np.round(np.mean(stable_segment['vel']), 4)} cm/sec")
+    plt.legend()
+    plt.savefig(os.path.join(output_folder, f'{pwm_value}_stable_segment_kdeplot.pdf'))
+    #plt.show(block=False)
+    #plt.pause(0.1)
+    plt.close()
+    
+    plt.figure(figsize=(15, 3))
+    stable_segment.groupby('sec')['vel'].mean().plot(label='mean')
+    stable_segment.groupby('sec')['vel'].median().plot(label='median')
+    plt.ylabel('Velocity (cm/sec)')
+    plt.legend()
+    plt.ylabel('Vicon Estimated Speed')
+    plt.xlabel('No. of Frames')
+    plt.savefig(os.path.join(output_folder, f'{pwm_value}_stable_segment_velocity.pdf'))
+    #plt.show(block=False)
+    #plt.pause(0.1)
+    plt.close()
+    
+results_df = pd.DataFrame(results, columns=['PWM', 'estimated_velocity'])
+results_df.to_csv('vicon_estimated_velocities.csv', index=False)
